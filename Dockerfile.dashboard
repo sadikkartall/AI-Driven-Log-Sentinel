@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY dashboard/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY dashboard/ ./dashboard/
+COPY outputs/ ./outputs/
+
+# Set environment variable for API URL (Docker network)
+ENV API_URL=http://backend:8000
+ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+ENV STREAMLIT_SERVER_ENABLE_CORS=false
+
+# Copy Streamlit config
+COPY .streamlit/ .streamlit/
+
+# Expose port
+EXPOSE 8501
+
+# Run Streamlit with optimized settings
+CMD ["streamlit", "run", "dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--browser.gatherUsageStats=false", "--server.enableCORS=false", "--server.enableXsrfProtection=false"]

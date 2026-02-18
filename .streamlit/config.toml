@@ -1,0 +1,25 @@
+[browser]
+gatherUsageStats = false
+
+[server]
+enableCORS = false
+enableXsrfProtection = false
+runOnSave = false
+fileWatcherType = "none"
+headless = true
+
+[client]
+showErrorDetails = false
+caching = true
+displayEnabled = true
+
+[ui]
+hideTopBar = false
+hideSidebarNav = false
+
+[theme]
+primaryColor = "#1f77b4"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
