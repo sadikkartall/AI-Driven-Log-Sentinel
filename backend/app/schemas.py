@@ -39,3 +39,15 @@ class LO2MetricRequest(BaseModel):
 class LO2MetricResponse(BaseModel):
     """LO2 metric anomaly detection response."""
     anomaly_score: float = Field(..., ge=0.0, le=1.0, description="Anomaly score between 0 and 1")
+
+
+class AnalyzeExplainRequest(BaseModel):
+    """Request for AI explanation - event_id or raw event data."""
+    event_id: Optional[str] = Field(None, description="Event ID from unified store")
+    event_data: Optional[Dict] = Field(None, description="Raw event payload for analysis")
+
+
+class AnalyzeCorrelatedRequest(BaseModel):
+    """Request for correlated incident analysis."""
+    incident_ts: Optional[float] = Field(None, description="Incident bucket timestamp")
+    event_ids: Optional[List[str]] = Field(None, description="Event IDs in incident")

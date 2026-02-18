@@ -41,6 +41,16 @@ if "lo2_log_events" not in st.session_state:
     st.session_state.lo2_log_events = []
 if "lo2_metric_events" not in st.session_state:
     st.session_state.lo2_metric_events = []
+if "unified_events" not in st.session_state:
+    st.session_state.unified_events = []
+if "correlated_incidents" not in st.session_state:
+    st.session_state.correlated_incidents = []
+if "last_modsec_result" not in st.session_state:
+    st.session_state.last_modsec_result = None
+if "last_lo2_log_result" not in st.session_state:
+    st.session_state.last_lo2_log_result = None
+if "last_lo2_metric_result" not in st.session_state:
+    st.session_state.last_lo2_metric_result = None
 if "api_status" not in st.session_state:
     st.session_state.api_status = None
 if "last_refresh" not in st.session_state:
@@ -230,6 +240,64 @@ def clear_events() -> bool:
         return False
 
 
+def get_unified_events_from_api(limit: int = 300) -> List[Dict]:
+    """Get unified event timeline from API."""
+    try:
+        response = requests.get(f"{API_URL}/events/unified?limit={limit}", timeout=5)
+        if response.status_code == 200:
+            return response.json().get("events", [])
+        return []
+    except Exception:
+        return []
+
+
+def get_correlated_incidents_from_api(limit: int = 50) -> List[Dict]:
+    """Get correlated incidents from API."""
+    try:
+        response = requests.get(f"{API_URL}/events/correlated?limit={limit}", timeout=5)
+        if response.status_code == 200:
+            return response.json().get("incidents", [])
+        return []
+    except Exception:
+        return []
+
+
+def get_ai_explanation(event_id: str = None, event_data: Dict = None) -> Optional[str]:
+    """Get AI explanation for an event via Gemini."""
+    try:
+        payload = {"event_id": event_id} if event_id else {"event_data": event_data}
+        response = requests.post(
+            f"{API_URL}/analyze/explain",
+            json=payload,
+            timeout=30
+        )
+        if response.status_code == 200:
+            return response.json().get("explanation")
+        return None
+    except Exception:
+        return None
+
+
+def get_ai_correlated_analysis(incident_ts: float = None, event_ids: List[str] = None) -> Optional[str]:
+    """Get AI correlation analysis for an incident."""
+    try:
+        payload = {}
+        if incident_ts is not None:
+            payload["incident_ts"] = incident_ts
+        elif event_ids:
+            payload["event_ids"] = event_ids
+        response = requests.post(
+            f"{API_URL}/analyze/correlated",
+            json=payload,
+            timeout=30
+        )
+        if response.status_code == 200:
+            return response.json().get("analysis")
+        return None
+    except Exception:
+        return None
+
+
 @st.cache_data
 def load_report_csv(path: Path) -> Optional[pd.DataFrame]:
     """Load CSV report file with caching."""
@@ -269,6 +337,10 @@ def main():
             st.info(f"ModSec Events: {summary.get('modsec', 0)}")
             st.info(f"LO2 Log Events: {summary.get('lo2_log', 0)}")
             st.info(f"LO2 Metric Events: {summary.get('lo2_metric', 0)}")
+            if "unified_total" in summary:
+                st.success(f"🔗 Unified Total: {summary.get('unified_total', 0)}")
+            if "correlated_count" in summary and summary.get("correlated_count", 0) > 0:
+                st.warning(f"⚠️ Korele Incident: {summary.get('correlated_count', 0)}")
         else:
             st.info(f"ModSec Events: {len(st.session_state.modsec_events)}")
             st.info(f"LO2 Log Events: {len(st.session_state.lo2_log_events)}")
@@ -280,6 +352,8 @@ def main():
                     st.session_state.modsec_events = get_modsec_events_from_api(limit=200)
                     st.session_state.lo2_log_events = get_lo2_log_events_from_api(limit=100)
                     st.session_state.lo2_metric_events = get_lo2_metric_events_from_api(limit=100)
+                    st.session_state.unified_events = get_unified_events_from_api(limit=200)
+                    st.session_state.correlated_incidents = get_correlated_incidents_from_api(limit=50)
             st.rerun()
         
         if st.button("🗑️ Clear Event Store"):
@@ -295,10 +369,69 @@ def main():
                 st.session_state.modsec_events = []
                 st.session_state.lo2_log_events = []
                 st.session_state.lo2_metric_events = []
+                st.session_state.unified_events = []
+                st.session_state.correlated_incidents = []
             st.rerun()
+        
+        st.markdown("---")
+        st.markdown("### Gemini AI")
+        st.caption("Açıklanabilirlik için GEMINI_API_KEY ortam değişkenini backend'e verin.")
+    
+    # Main tabs
+    tab0, tab1, tab2 = st.tabs(["🔗 Unified & Korelasyon", "ModSecurity", "LO2"])
+    
+    # Tab 0: Unified View & Correlation
+    with tab0:
+        st.header("Birleşik Görünüm & Korelasyon")
+        st.markdown("ModSec + LO2 olayları tek zaman çizelgesinde. Aynı 60sn pencerede her iki kaynak tetiklenirse **korele incident** sayılır.")
+        
+        if not api_status:
+            st.warning("⚠️ API bağlantısı yok. Backend'i başlatın.")
+        else:
+            if not st.session_state.unified_events:
+                with st.spinner("Olaylar yükleniyor..."):
+                    st.session_state.unified_events = get_unified_events_from_api(limit=200)
+                    st.session_state.correlated_incidents = get_correlated_incidents_from_api(limit=50)
+            
+            # Correlated incidents first (higher priority)
+            st.subheader("⚠️ Korele Incident'ler (ModSec + LO2 aynı pencerede)")
+            if st.session_state.correlated_incidents:
+                for idx, inc in enumerate(st.session_state.correlated_incidents[:10]):
+                    sev = inc.get("severity", "medium")
+                    badge = "🔴" if sev == "critical" else "🟠" if sev == "high" else "🟡"
+                    with st.expander(f"{badge} Incident | Skor: {inc.get('combined_score', 0):.2f} | {len(inc.get('events', []))} olay"):
+                        for evt in inc.get("events", [])[:5]:
+                            typ = evt.get("type", "")
+                            sc = evt.get("combined_score", 0)
+                            st.caption(f"[{typ}] skor={sc:.2f}")
+                        if st.button("🤖 AI Korelasyon Analizi", key=f"ai_corr_{idx}"):
+                            with st.spinner("Gemini analiz ediyor..."):
+                                analysis = get_ai_correlated_analysis(incident_ts=inc.get("ts"))
+                                if analysis:
+                                    st.info(analysis)
+                                else:
+                                    st.error("GEMINI_API_KEY ayarlı değil veya analiz başarısız.")
+            else:
+                st.info("Henüz korele incident yok. ModSec ve LO2 replay'lerini aynı anda çalıştırın.")
+            
+            st.divider()
+            st.subheader("Birleşik Olay Zaman Çizelgesi")
+            if st.session_state.unified_events:
+                df = pd.DataFrame([
+                    {
+                        "Tip": e.get("type", ""),
+                        "Skor": round(e.get("combined_score", 0), 3),
+                        "ID": e.get("event_id", ""),
+                        "Tehdit": e.get("threat_type", "-") if e.get("type") == "modsec" else "-",
+                    }
+                    for e in st.session_state.unified_events[:80]
+                ])
+                st.dataframe(df, height=250)
+                st.caption("Her olay için 'AI Açıklama' almak: ModSecurity veya LO2 sekmesinde manuel testten sonra event_id ile /analyze/explain kullanın.")
+            else:
+                st.info("Henüz olay yok. Replay scriptlerini çalıştırın veya Manuel Test kullanın.")
     
     # Main tabs (Reports removed for performance)
-    tab1, tab2 = st.tabs(["ModSecurity", "LO2"])
     
     # Tab 1: ModSecurity
     with tab1:
@@ -388,26 +521,42 @@ def main():
                         with st.spinner("Analyzing request..."):
                             result = get_modsec_prediction(test_request)
                             if result:
-                                st.success("✅ Analysis complete!")
-                                
-                                # Display results in columns
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.metric("Risk Score", f"{result.get('risk_score', 0):.3f}")
-                                    st.metric("Threat Type", result.get('threat_type', 'UNKNOWN'))
-                                with col2:
-                                    if result.get('top_signals'):
-                                        st.markdown("**Top Signals:**")
-                                        for signal in result.get('top_signals', [])[:5]:
-                                            st.write(f"• {signal}")
-                                
-                                # Show full JSON (cannot nest expanders)
-                                st.markdown("**📋 Full Response JSON:**")
-                                st.json(result)
-                                
-                                st.info("💡 Event has been added to the event store. Click '🔄 Refresh All Events' to see it.")
+                                st.session_state.last_modsec_result = {"result": result, "request": test_request}
                             else:
+                                st.session_state.last_modsec_result = None
                                 st.error("❌ Failed to get prediction. Check API connection.")
+                
+                if st.session_state.last_modsec_result:
+                    data = st.session_state.last_modsec_result
+                    result = data["result"]
+                    test_req = data["request"]
+                    st.success("✅ Analysis complete!")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Risk Score", f"{result.get('risk_score', 0):.3f}")
+                        st.metric("Threat Type", result.get('threat_type', 'UNKNOWN'))
+                    with col2:
+                        if result.get('top_signals'):
+                            st.markdown("**Top Signals:**")
+                            for signal in result.get('top_signals', [])[:5]:
+                                st.write(f"• {signal}")
+                    st.markdown("**📋 Full Response JSON:**")
+                    st.json(result)
+                    if st.button("🤖 AI Açıklama (Gemini)", key="ai_explain_modsec"):
+                        with st.spinner("Gemini analiz ediyor..."):
+                            expl = get_ai_explanation(event_data={
+                                "type": "modsec",
+                                "request_text": test_req,
+                                "risk_score": result.get("risk_score", 0),
+                                "threat_type": result.get("threat_type", ""),
+                                "top_signals": result.get("top_signals", []),
+                            })
+                            if expl:
+                                st.success("**AI Açıklaması:**")
+                                st.write(expl)
+                            else:
+                                st.warning("GEMINI_API_KEY ayarlı değil veya analiz başarısız.")
+                    st.info("💡 Event has been added to the event store. Click '🔄 Refresh All Events' to see it.")
     
     # Tab 2: LO2
     with tab2:
@@ -524,21 +673,37 @@ def main():
                             with st.spinner("Analyzing log..."):
                                 result = get_lo2_log_score(test_log)
                                 if result:
-                                    st.success("✅ Analysis complete!")
-                                    
-                                    col1, col2 = st.columns(2)
-                                    with col1:
-                                        st.metric("Anomaly Score", f"{result.get('anomaly_score', 0):.3f}")
-                                    with col2:
-                                        risk_level = "High" if result.get('anomaly_score', 0) > 0.7 else "Medium" if result.get('anomaly_score', 0) > 0.4 else "Low"
-                                        st.metric("Risk Level", risk_level)
-                                    
-                                    st.markdown("**📋 Full Response JSON:**")
-                                    st.json(result)
-                                    
-                                    st.info("💡 Event has been added to the event store. Click '🔄 Refresh All Events' to see it.")
+                                    st.session_state.last_lo2_log_result = {"result": result, "log": test_log}
                                 else:
+                                    st.session_state.last_lo2_log_result = None
                                     st.error("❌ Failed to get anomaly score. Check API connection.")
+                    
+                    if st.session_state.last_lo2_log_result:
+                        data = st.session_state.last_lo2_log_result
+                        result = data["result"]
+                        test_log_val = data["log"]
+                        st.success("✅ Analysis complete!")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Anomaly Score", f"{result.get('anomaly_score', 0):.3f}")
+                        with col2:
+                            risk_level = "High" if result.get('anomaly_score', 0) > 0.7 else "Medium" if result.get('anomaly_score', 0) > 0.4 else "Low"
+                            st.metric("Risk Level", risk_level)
+                        st.markdown("**📋 Full Response JSON:**")
+                        st.json(result)
+                        if st.button("🤖 AI Açıklama (Gemini)", key="ai_explain_log"):
+                            with st.spinner("Gemini analiz ediyor..."):
+                                expl = get_ai_explanation(event_data={
+                                    "type": "lo2_log",
+                                    "log_text": test_log_val,
+                                    "anomaly_score": result.get("anomaly_score", 0),
+                                })
+                                if expl:
+                                    st.success("**AI Açıklaması:**")
+                                    st.write(expl)
+                                else:
+                                    st.warning("GEMINI_API_KEY ayarlı değil veya analiz başarısız.")
+                        st.info("💡 Event has been added to the event store. Click '🔄 Refresh All Events' to see it.")
             
             # LO2 Metric Manual Test
             with test_col2:
@@ -569,31 +734,16 @@ def main():
                             try:
                                 import json
                                 metrics_dict = json.loads(test_metrics_json)
-                                
-                                # Validate it's a dict with numeric values
                                 if not isinstance(metrics_dict, dict):
                                     st.error("❌ Metrics must be a JSON object/dictionary.")
                                 else:
-                                    # Convert all values to float
                                     metrics_dict = {k: float(v) for k, v in metrics_dict.items()}
-                                    
                                     with st.spinner("Analyzing metrics..."):
                                         result = get_lo2_metric_score(metrics_dict)
                                         if result:
-                                            st.success("✅ Analysis complete!")
-                                            
-                                            col1, col2 = st.columns(2)
-                                            with col1:
-                                                st.metric("Anomaly Score", f"{result.get('anomaly_score', 0):.3f}")
-                                            with col2:
-                                                risk_level = "High" if result.get('anomaly_score', 0) > 0.7 else "Medium" if result.get('anomaly_score', 0) > 0.4 else "Low"
-                                                st.metric("Risk Level", risk_level)
-                                            
-                                            st.markdown("**📋 Full Response JSON:**")
-                                            st.json(result)
-                                            
-                                            st.info("💡 Event has been added to the event store. Click '🔄 Refresh All Events' to see it.")
+                                            st.session_state.last_lo2_metric_result = {"result": result, "metrics": metrics_dict}
                                         else:
+                                            st.session_state.last_lo2_metric_result = None
                                             st.error("❌ Failed to get anomaly score. Check API connection.")
                             except json.JSONDecodeError as e:
                                 st.error(f"❌ Invalid JSON format: {str(e)}")
@@ -601,6 +751,33 @@ def main():
                                 st.error(f"❌ Invalid metric values: {str(e)}")
                             except Exception as e:
                                 st.error(f"❌ Error: {str(e)}")
+                    
+                    if st.session_state.last_lo2_metric_result:
+                        data = st.session_state.last_lo2_metric_result
+                        result = data["result"]
+                        metrics_dict = data["metrics"]
+                        st.success("✅ Analysis complete!")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Anomaly Score", f"{result.get('anomaly_score', 0):.3f}")
+                        with col2:
+                            risk_level = "High" if result.get('anomaly_score', 0) > 0.7 else "Medium" if result.get('anomaly_score', 0) > 0.4 else "Low"
+                            st.metric("Risk Level", risk_level)
+                        st.markdown("**📋 Full Response JSON:**")
+                        st.json(result)
+                        if st.button("🤖 AI Açıklama (Gemini)", key="ai_explain_metric"):
+                            with st.spinner("Gemini analiz ediyor..."):
+                                expl = get_ai_explanation(event_data={
+                                    "type": "lo2_metric",
+                                    "metrics_preview": metrics_dict,
+                                    "anomaly_score": result.get("anomaly_score", 0),
+                                })
+                                if expl:
+                                    st.success("**AI Açıklaması:**")
+                                    st.write(expl)
+                                else:
+                                    st.warning("GEMINI_API_KEY ayarlı değil veya analiz başarısız.")
+                        st.info("💡 Event has been added to the event store. Click '🔄 Refresh All Events' to see it.")
 
 
 if __name__ == "__main__":

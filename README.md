@@ -78,6 +78,17 @@ Proje iki ana bileşenden oluşur:
   - `POST /score/lo2/metric` - Metrik verileri için anomali skoru
 - **Çıktı**: Anomali skoru (0-1, 1 = en anormal)
 
+### 3. Birleşik Görünüm & Korelasyon
+- **Amaç**: ModSec ve LO2 olaylarını tek zaman çizelgesinde birleştirip korelasyon tespiti
+- **Korelasyon**: Aynı 60sn pencerede hem ModSec tehdidi hem LO2 anomalisi = korele incident
+- **Endpoint**: `GET /events/unified`, `GET /events/correlated`
+- **Birleşik Skor**: ModSec + LO2 skorlarının ağırlıklı ortalaması
+
+### 4. Gemini AI (Açıklanabilirlik)
+- **Amaç**: Tehdit ve anomali tespitlerine Türkçe açıklama
+- **Gereksinim**: `GEMINI_API_KEY` ortam değişkeni
+- **Endpoint**: `POST /analyze/explain`, `POST /analyze/correlated`
+
 ## 🚀 Kurulum
 
 ### Docker ile Çalıştırma
@@ -411,6 +422,7 @@ pytest ../tests/ -v
 - `CORS_ORIGINS`: CORS izin verilen origin'ler (default: `*`)
 - `MODSEC_MODEL_DIR`: ModSecurity model dizini (default: `outputs/models/modsec`)
 - `LO2_MODEL_DIR`: LO2 model dizini (default: `outputs/models/lo2`)
+- `GEMINI_API_KEY`: Google Gemini API anahtarı (AI açıklamaları için, opsiyonel)
 
 **Dashboard:**
 - `API_URL`: Backend API URL'i (Docker: `http://backend:8000`, Local: `http://localhost:8000`)

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.settings import settings
-from app.routers import events, lo2, modsec
+from app.routers import analyze, events, lo2, modsec
 from app.schemas import HealthResponse
 
 # Configure logging
@@ -82,6 +82,7 @@ app.add_middleware(
 app.include_router(modsec.router)
 app.include_router(lo2.router)
 app.include_router(events.router)
+app.include_router(analyze.router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])
